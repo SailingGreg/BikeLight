@@ -33,10 +33,10 @@ int lightType = TYPE_FAST; // the default
 const int buttonPin = 2;
 
 int previousState = HIGH;
-unsigned int previousPress = 0; // initailised as 0
-int buttonState;
+//unsigned int previousPress = 0; // initailised as 0
+int buttonState; // not used
 int buttonFlag = 0;
-int buttonDebounce = 20;
+int buttonDebounce = 200; // found to be 120-150 for the simple buttons
 
 
 /* Change these values to set the current initial time */
@@ -51,13 +51,13 @@ const byte year = 21;
 
 const byte secDelay = 30;
 int timeDelay = 0;
-int sensitivity = 10;
+int sensitivity = 5;
 byte Debug = true; // this could be a #def
 
 bool lightRunning = false;
 bool motionInt = false; /* we assume motion to start with */
 bool prevMotionInt = false;
-int orgPos = 0;
+//int orgPos = 0;
 
 BMA250 accel_sensor;
 int x, y, z;
@@ -120,21 +120,20 @@ void setup() {
 
 // put your main code here, to run repeatedly:
 void loop(){
+  static int orgPos = 0;
   int pos = 0;
 
   // check for button press
-  if((millis() - previousPress) > buttonDebounce && buttonFlag)
-  {
-    if (Debug == true) SerialMonitorInterface.println("Press debounced");
+  //if((millis() - previousPress) > buttonDebounce && buttonFlag)
+  //{
+  if (buttonFlag) {
     lightType = (lightType + 1) % LIGHTTYPES;
-
     buttonFlag = 0;
   }
 
   if (lightRunning == true) {
 
     switch (lightType) {
-
       case TYPE_BREATH:
         pixelsBreath(15);
         break;
@@ -154,32 +153,10 @@ void loop(){
   } else { 
     pixels.clear(); // ensure all off
     pixels.show();
+    delay (100); // greater than 64msec
   }
 
-  delay (100); // greater than 64msec
 
-  /* do light loop */
-  /*
-  if (lightRunning == true) {
-    for(int i = 1; i < 16 ;i++) {
-     LedOn(i);
-     if (i < 15) {
-       LedOn(i + 1);
-     }
-     delay(100);
-    };
-    for(int i = 16; i > 1; i--) {
-     LedOn(i);
-     if (i > 2) {
-       LedOn(i - 1);
-     }
-     delay(100);
-   } 
-     LedOn(0); // ensure we switch leds off at the end of the cycle
-  } else {
-     delay (500); // ensure check is only every 1/5 sec
-   }
-   */
   
   /* here we check the bma250 to see if there has been a change */
   /* we just set the motion flag if there appears to have been motion to simulate an interupt */
@@ -191,8 +168,9 @@ void loop(){
   
   pos = sqrt(sq(x) + sq(y) + sq(z)); // 3dim 'position'
   if (orgPos == 0) orgPos = pos; // sets initial 'pos'
-  
-  if (pos > orgPos + sensitivity || pos < orgPos - sensitivity) { // have we moved?
+
+  //if (Debug == true) SerialMonitorInterface.print(pos - orgPos); 
+  if (pos >= orgPos + sensitivity || pos <= orgPos - sensitivity) { // have we moved?
     motionInt = true;
     // need to add a 500msec gap
     if (prevMotionInt == false) { // guard to stop battery display if continual motion
@@ -216,8 +194,22 @@ void loop(){
 
 void button_ISR()
 {
-  if (Debug == true) SerialMonitorInterface.println("Button pressed");
-  buttonFlag = 1;
+  static unsigned int previousPress = 0;
+  
+  if (Debug == true) {
+    SerialMonitorInterface.print("Button pressed: ");
+    //SerialMonitorInterface.print(millis());
+    //SerialMonitorInterface.print(", ");
+    SerialMonitorInterface.println(millis() - previousPress);
+  }
+
+  // the buttonDebounce should be suffixcient but buttonFlag added as an extra guard
+  if((millis() - previousPress) > buttonDebounce && buttonFlag == 0) {
+    if (Debug == true) SerialMonitorInterface.println("Press debounced");
+        
+    previousPress = millis();
+    buttonFlag = 1;
+  }
   // ensure lights are on?
   //lightRunning = true;
 }
@@ -241,14 +233,18 @@ void pixelsFlash(int lightSpeed) {
     } 
 } // end of flash
 
-void pixelsBreath(int lightDelay) {   
+void pixelsBreath(int lightDelay) { 
+    int step = 4; // adjust the speed
+      
     pixels.clear();
+
+    // try setStrip?
     for (int i = 0; i < NUMPIXELS; i++) { 
       pixels.setPixelColor(i, pixels.Color(255, 255, 255, 255));
     }
 
-    for (int i=30; i<255; i++) { pixels.setBrightness(i); pixels.show(); delay(lightDelay); }
-    for (int i=255; i>30; i--) { pixels.setBrightness(i); pixels.show(); delay(lightDelay); }
+    for (int i = 30; i < 255; i = i + step) { pixels.setBrightness(i); pixels.show(); delay(lightDelay); }
+    for (int i = 255; i > 30; i = i - step) { pixels.setBrightness(i); pixels.show(); delay(lightDelay); }
 
 } // end of breath
 
