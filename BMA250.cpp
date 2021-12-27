@@ -66,7 +66,6 @@ int BMA250::begin(uint8_t range, uint8_t bw)
    Wire.write(0x14); // note this is the default value - see page 47 of the spec
    Wire.endTransmission();
 
-
   return 0;
 }
 

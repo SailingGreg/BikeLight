@@ -88,7 +88,7 @@ void setup() {
   timeDelay = secDelay;
   // this ensures the port is connnected and timeouts if not
   // this means it works if usb is connected or not
-  if (Debug == true) while (!SerialMonitorInterface  && (millis() < 2500));
+  if (Debug == true) while (!SerialMonitorInterface  && (millis() < 5000));
 
   rtc.setAlarmSeconds (secDelay);
   rtc.enableAlarm(rtc.MATCH_SS);
@@ -112,11 +112,23 @@ void setup() {
   // setup interrupt for button
   pinMode(buttonPin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(buttonPin), buttonInterrupt, CHANGE);
+  //attachInterrupt(digitalPinToInterrupt(buttonPin), buttonInterrupt, CHANGE);
 
   // for bma250 interrupts
   //pinMode(1, INPUT_PULLDOWN);
   pinMode(1, INPUT_PULLDOWN); //BMA raises pin high on interrupt
-  attachInterrupt(digitalPinToInterrupt(1), BMAInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(1), BMAInterrupt, RISING); // or FALLING
+  //attachInterrupt(digitalPinToInterrupt(1), BMAInterrupt, CHANGE);
+
+#if defined(ARDUINO_ARCH_SAMD)
+  if (Debug == true) SerialMonitorInterface.println("EIC change ...");
+  // https://github.com/arduino/ArduinoCore-samd/issues/142
+  // Clock EIC in sleep mode so that we can use pin change interrupts
+  // The RTCZero library will setup generic clock 2 to XOSC32K/32
+  // and we'll use that for the EIC. Increases power consumption by ~50uA
+  GCLK->CLKCTRL.reg = uint16_t(GCLK_CLKCTRL_CLKEN | GCLK_CLKCTRL_GEN_GCLK2 | GCLK_CLKCTRL_ID( GCLK_CLKCTRL_ID_EIC_Val ) );
+  while (GCLK->STATUS.bit.SYNCBUSY) {}
+#endif
 
 }
 
@@ -152,9 +164,27 @@ void loop(){
         pixelsBreath(15);
     }
 
-  } else { 
+  } else {
+    // indicating we are sleeping
+    for (int i = 0; i < 7; i++) {
+      pixels.setPixelColor(i, pixels.Color(0, 255, 0, 0));
+    }
+    pixels.show();
+    delay(500);
+    
     pixels.clear(); // ensure all off
     pixels.show();
+    // we've not seen any motion so sleep
+
+    // once we've done this usb is 'disabled' so no debugging!
+    rtc.standbyMode();
+
+    // also need to cancel the alarm timer as this still fires in the background so one loop every 'interval'
+    /*
+    if (lightRunning == false) { // then go into sleep mode, that is suspend the main loop
+      rtc.standbyMode();
+    }
+    */
     delay (100); // greater than 64msec
   }
 
@@ -195,7 +225,7 @@ void loop(){
     //accel_sensor.readInter();
     SerialMonitorInterface.print("interruptStatus: ");
     SerialMonitorInterface.println(accel_sensor.interruptStatus);
-    motionInterrupt = false;
+    motionInterrupt = false; // reset the interrupt flag
   }
   orgPos = pos;
 
@@ -205,7 +235,7 @@ void BMAInterrupt()
 {
   accel_sensor.readInter(); // read the type of interrupt 
   if (Debug == true) SerialMonitorInterface.println("BMA interrupt");
-  motionInterrupt = true;
+  motionInterrupt = true; // flag motion
 }
 
 void buttonInterrupt()
@@ -297,6 +327,8 @@ void alarmMatch() {
       print2digits(rtc.getSeconds());
       SerialMonitorInterface.println();
     }
+
+
 }
 
 // routine lights a number of leds to indicate battery charge based on measured voltage
