@@ -22,9 +22,11 @@ public:
 BMA250();
 int begin(uint8_t, uint8_t);
 void read();
+void readInter();
 int16_t X,Y,Z;
 int8_t rawTemp;
 int8_t tempC;
-uint8_t I2Caddress=0;
+uint8_t I2Caddress = 0;
+uint8_t interruptStatus = 0;
 };
 #endif

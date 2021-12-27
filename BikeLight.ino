@@ -20,6 +20,7 @@
 
 RTCZero rtc; // create an rtc object
 // needs ‘w’ for the white element
+//Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRBW + NEO_KHZ800);
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_RGBW + NEO_KHZ800);
 
 // sequeneces
@@ -57,6 +58,7 @@ byte Debug = true; // this could be a #def
 bool lightRunning = false;
 bool motionInt = false; /* we assume motion to start with */
 bool prevMotionInt = false;
+bool motionInterrupt = false; // used to flag motion
 //int orgPos = 0;
 
 BMA250 accel_sensor;
@@ -82,17 +84,19 @@ void setup() {
   rtc.setYear(year);
 
   // note this is the time and not the delay
-  // if you set this to 30 it will trigger every minute with the seconds are 30!
+  // if you set this to 30 it will trigger every minute when the seconds are 30!
   timeDelay = secDelay;
+  // this ensures the port is connnected and timeouts if not
+  // this means it works if usb is connected or not
+  if (Debug == true) while (!SerialMonitorInterface  && (millis() < 2500));
+
   rtc.setAlarmSeconds (secDelay);
   rtc.enableAlarm(rtc.MATCH_SS);
 
   rtc.attachInterrupt(alarmMatch); /* call back routine */
   lightRunning = false;
 
-  if (Debug == true) while (!SerialMonitorInterface) ;
   // bma250 bit
-  
   if (Debug == true) SerialMonitorInterface.println("Initialize BMA250 ...");
   accel_sensor.begin(BMA250_range_2g, BMA250_update_time_64ms); 
 
@@ -102,19 +106,17 @@ void setup() {
   pixels.begin();
   pixels.show(); // all pixels to 'off'
   
-  if (Debug == true) SerialMonitorInterface.println("Starting ...");
+  //if (Debug == true) SerialMonitorInterface.println("Starting ...");
   //LedOn(0); // turnoff leds
 
   // setup interrupt for button
   pinMode(buttonPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(buttonPin), buttonInterrupt, CHANGE);
 
-  attachInterrupt(digitalPinToInterrupt(buttonPin), button_ISR, CHANGE);
-  // Get battery voltage and indicate status
-  /*
-  if (Debug == true) {
-    displayBatt();
-  }
-  */
+  // for bma250 interrupts
+  //pinMode(1, INPUT_PULLDOWN);
+  pinMode(1, INPUT_PULLDOWN); //BMA raises pin high on interrupt
+  attachInterrupt(digitalPinToInterrupt(1), BMAInterrupt, CHANGE);
 
 }
 
@@ -170,7 +172,9 @@ void loop(){
   if (orgPos == 0) orgPos = pos; // sets initial 'pos'
 
   //if (Debug == true) SerialMonitorInterface.print(pos - orgPos); 
-  if (pos >= orgPos + sensitivity || pos <= orgPos - sensitivity) { // have we moved?
+  //if (pos >= orgPos + sensitivity || pos <= orgPos - sensitivity) { // have we moved?
+  if (motionInterrupt == true) { // relies on interrupt routine
+    if (Debug == true) SerialMonitorInterface.println("Motion detected");
     motionInt = true;
     // need to add a 500msec gap
     if (prevMotionInt == false) { // guard to stop battery display if continual motion
@@ -180,32 +184,46 @@ void loop(){
     
     lightRunning = true; // we also set this in case it was stopped
     
-    if (Debug == true) SerialMonitorInterface.println("Motion detected, restarting");
+
     if (Debug == true) {
       SerialMonitorInterface.print("Pos "); 
       SerialMonitorInterface.print(pos);
       SerialMonitorInterface.print(" ,");
       SerialMonitorInterface.println(orgPos);
     }
+
+    //accel_sensor.readInter();
+    SerialMonitorInterface.print("interruptStatus: ");
+    SerialMonitorInterface.println(accel_sensor.interruptStatus);
+    motionInterrupt = false;
   }
   orgPos = pos;
 
 }
 
-void button_ISR()
+void BMAInterrupt()
 {
-  static unsigned int previousPress = 0;
-  
+  accel_sensor.readInter(); // read the type of interrupt 
+  if (Debug == true) SerialMonitorInterface.println("BMA interrupt");
+  motionInterrupt = true;
+}
+
+void buttonInterrupt()
+{
+  static unsigned int previousPress = 0;  // retain the last press
+
+  /*
   if (Debug == true) {
     SerialMonitorInterface.print("Button pressed: ");
     //SerialMonitorInterface.print(millis());
     //SerialMonitorInterface.print(", ");
     SerialMonitorInterface.println(millis() - previousPress);
   }
+  */
 
   // the buttonDebounce should be suffixcient but buttonFlag added as an extra guard
   if((millis() - previousPress) > buttonDebounce && buttonFlag == 0) {
-    if (Debug == true) SerialMonitorInterface.println("Press debounced");
+    //if (Debug == true) SerialMonitorInterface.println("Press debounced");
         
     previousPress = millis();
     buttonFlag = 1;
