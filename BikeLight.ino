@@ -23,14 +23,14 @@ RTCZero rtc; // create an rtc object
 //Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRBW + NEO_KHZ800);
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_RGBW + NEO_KHZ800);
 
-// sequeneces
+// sequeneces & switch pin
 #define TYPE_BREATH  0
 #define TYPE_FAST 1
 #define TYPE_MEDIUM 2
 #define TYPE_SLOW 3
 #define LIGHTTYPES 4
 
-int lightType = TYPE_FAST; // the default
+int lightType = TYPE_BREATH; // the default
 const int buttonPin = 2;
 
 int previousState = HIGH;
@@ -70,7 +70,7 @@ void setup() {
   
   // put your setup code here, to run once:
   if (Debug == true) SerialMonitorInterface.begin(115200);
-  rtc.begin(); // initialize RTC
+  rtc.begin(false); // initialize RTC
   Wire.begin(); // enable access to the BMA250
 
   // Set the time
@@ -90,7 +90,7 @@ void setup() {
   // this means it works if usb is connected or not
   if (Debug == true) while (!SerialMonitorInterface  && (millis() < 5000));
 
-  rtc.setAlarmSeconds (secDelay);
+  //rtc.setAlarmSeconds (secDelay);
   rtc.enableAlarm(rtc.MATCH_SS);
 
   rtc.attachInterrupt(alarmMatch); /* call back routine */
@@ -135,6 +135,7 @@ void setup() {
 // put your main code here, to run repeatedly:
 void loop(){
   static int orgPos = 0;
+  static int previousInt = 0; // time of previous int
   int pos = 0;
 
   // check for button press
@@ -165,27 +166,24 @@ void loop(){
     }
 
   } else {
-    // indicating we are sleeping
-    for (int i = 0; i < 7; i++) {
-      pixels.setPixelColor(i, pixels.Color(0, 255, 0, 0));
-    }
+    // indicating we are about to sleep
+    pixels.fill(pixels.Color(0, 255, 0, 0), 0); // fill red
     pixels.show();
     delay(500);
     
     pixels.clear(); // ensure all off
     pixels.show();
+    
     // we've not seen any motion so sleep
 
     // once we've done this usb is 'disabled' so no debugging!
+    // also need to cancel the alarm timer as this still fires in the background so one loop every 'interval'
+    //USBDevice.detach(); // believe this is done in the routine
+
+    rtc.disableAlarm(); // we are relying on the interrupts
     rtc.standbyMode();
 
-    // also need to cancel the alarm timer as this still fires in the background so one loop every 'interval'
-    /*
-    if (lightRunning == false) { // then go into sleep mode, that is suspend the main loop
-      rtc.standbyMode();
-    }
-    */
-    delay (100); // greater than 64msec
+    //delay (100); // greater than 64msec
   }
 
 
@@ -193,6 +191,7 @@ void loop(){
   /* here we check the bma250 to see if there has been a change */
   /* we just set the motion flag if there appears to have been motion to simulate an interupt */
 
+  /*
   accel_sensor.read();
   x = accel_sensor.X;
   y = accel_sensor.Y;
@@ -200,10 +199,12 @@ void loop(){
   
   pos = sqrt(sq(x) + sq(y) + sq(z)); // 3dim 'position'
   if (orgPos == 0) orgPos = pos; // sets initial 'pos'
+  */
 
   //if (Debug == true) SerialMonitorInterface.print(pos - orgPos); 
   //if (pos >= orgPos + sensitivity || pos <= orgPos - sensitivity) { // have we moved?
-  if (motionInterrupt == true) { // relies on interrupt routine
+  if ((millis() - previousInt) > 1000 && motionInterrupt == true) { // relies on interrupt routine
+    previousInt = millis();
     if (Debug == true) SerialMonitorInterface.println("Motion detected");
     motionInt = true;
     // need to add a 500msec gap
@@ -213,18 +214,34 @@ void loop(){
     }
     
     lightRunning = true; // we also set this in case it was stopped
-    
 
+    // indicate interrupt by flashing blue
+    pixels.fill(pixels.Color(0, 0, 255, 0), 0); // fill blue
+    pixels.show();
+    delay(300);
+    
+    /*
     if (Debug == true) {
       SerialMonitorInterface.print("Pos "); 
       SerialMonitorInterface.print(pos);
       SerialMonitorInterface.print(" ,");
       SerialMonitorInterface.println(orgPos);
     }
+    */
+
+    // if there is motion we 'increase' the timeout
+    // this assumes delay less than a minute
+    timeDelay = rtc.getSeconds();
+    //timeDelay = timeDelay + secDelay;  // add the delay
+    //if (timeDelay >= 60) timeDelay = timeDelay % 60;
+    timeDelay = (timeDelay + secDelay) % 60;
+
+    rtc.setAlarmSeconds(timeDelay); // we just change the seconds for the check
+    rtc.enableAlarm(rtc.MATCH_SS); // and ensure it is enabled
 
     //accel_sensor.readInter();
-    SerialMonitorInterface.print("interruptStatus: ");
-    SerialMonitorInterface.println(accel_sensor.interruptStatus);
+    //SerialMonitorInterface.print("interruptStatus: ");
+    //SerialMonitorInterface.println(accel_sensor.interruptStatus);
     motionInterrupt = false; // reset the interrupt flag
   }
   orgPos = pos;
@@ -233,8 +250,8 @@ void loop(){
 
 void BMAInterrupt()
 {
-  accel_sensor.readInter(); // read the type of interrupt 
-  if (Debug == true) SerialMonitorInterface.println("BMA interrupt");
+  //accel_sensor.readInter(); // read the type of interrupt 
+  //if (Debug == true) SerialMonitorInterface.println("BMA interrupt");
   motionInterrupt = true; // flag motion
 }
 
@@ -269,9 +286,12 @@ void pixelsFlash(int lightSpeed) {
 
     for (int i = 1; i < cnt; i++) { // do this 10 times or around 1 second
 
+      pixels.fill(pixels.Color(255, 255, 255, 255), 0); // fill white
+      /*
       for (int i = 0; i < NUMPIXELS; i++) { 
         pixels.setPixelColor(i, pixels.Color(255, 255, 255, 255));
       }
+      */
 
       pixels.show();
       delay(lightSpeed * 10); // on
@@ -287,9 +307,12 @@ void pixelsBreath(int lightDelay) {
     pixels.clear();
 
     // try setStrip?
+    pixels.fill(pixels.Color(255, 255, 255, 255), 0); // fill white
+    /*
     for (int i = 0; i < NUMPIXELS; i++) { 
       pixels.setPixelColor(i, pixels.Color(255, 255, 255, 255));
     }
+    */
 
     for (int i = 30; i < 255; i = i + step) { pixels.setBrightness(i); pixels.show(); delay(lightDelay); }
     for (int i = 255; i > 30; i = i - step) { pixels.setBrightness(i); pixels.show(); delay(lightDelay); }
@@ -300,6 +323,7 @@ void pixelsBreath(int lightDelay) {
 void alarmMatch() {
 
     /* if we've seen motion then continue to light leds */
+    /*
     if (motionInt == true) { // we had motion during the interval
       lightRunning = true;
     } else {
@@ -307,9 +331,15 @@ void alarmMatch() {
       prevMotionInt = false;
       //LedOn(0); // turnoff leds
     }
-    //prevMotionInt = false;
+    */
+    //USBDevice.attach();
+    //if (Debug == true) SerialMonitorInterface.begin(115200);
+
+    lightRunning = false;
+    prevMotionInt = false;
     motionInt = false; // and reset the flag
 
+    /*
     // this assumes delay less than a minute
     timeDelay = timeDelay + secDelay;
     if (timeDelay >= 60) timeDelay = timeDelay % 60;
@@ -317,7 +347,9 @@ void alarmMatch() {
     rtc.setAlarmSeconds(timeDelay); // we just change the seconds for the check
     //rtc.enableAlarm(rtc.MATCH_SS);
     //rtc.attachInterrupt(alarmMatch);
-
+    */
+    
+    /*
     if (Debug == true){
       SerialMonitorInterface.print("Alarm reset: ");
       print2digits(rtc.getHours());
@@ -327,8 +359,7 @@ void alarmMatch() {
       print2digits(rtc.getSeconds());
       SerialMonitorInterface.println();
     }
-
-
+    */
 }
 
 // routine lights a number of leds to indicate battery charge based on measured voltage
@@ -346,9 +377,9 @@ void displayBatt() {
       pixels.setPixelColor(i, pixels.Color(255, 0, 0, 0));
       
       pixels.show();
-      delay(300);
+      delay(150);
     }
-    delay (800);
+    delay (400);
     
   pixels.clear();
   pixels.show(); // all pixels to 'off'
